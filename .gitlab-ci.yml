@@ -23,34 +23,6 @@ stages:
     - echo DL_DIR = $DL_DIR
     - rm -rf $KAS_WORK_DIR
     - mkdir --verbose --parents $KAS_WORK_DIR $KAS_REPO_REF_DIR $SSTATE_DIR $DL_DIR $TOOLCHAIN_DIR $TOOLCHAIN_LINK_DIR
-    # Must do this here, as it's the only way to make sure the toolchain is installed on the same builder
-    - ./ci/get-binary-toolchains $DL_DIR $TOOLCHAIN_DIR $TOOLCHAIN_LINK_DIR
-    - sudo apt update && sudo apt install --yes telnet python3-subunit
-
-# Generalised fragment to do a Kas build
-.build:
-  extends: .setup
-  script:
-    - KASFILES=$(./ci/jobs-to-kas "$CI_JOB_NAME")
-    - kas shell --update --force-checkout $KASFILES -c 'cat conf/*.conf'
-    - kas build $KASFILES
-    - ./ci/check-warnings $KAS_WORK_DIR/build/warnings.log
-  artifacts:
-    name: "logs"
-    when: on_failure
-    paths:
-      - $CI_PROJECT_DIR/work/build/tmp/work*/**/temp/log.do_*.*
-
-# Workaround for Zephyr not currectly handling TESTIMAGE_AUTO
-.build_and_test:
-  extends: .setup
-  script:
-    - KASFILES=$(./ci/jobs-to-kas "$CI_JOB_NAME")
-    - kas shell --update --force-checkout $KASFILES -c 'cat conf/*.conf'
-    - kas build $KASFILES
-    - kas build $KASFILES -c testimage
-    - ./ci/check-warnings $KAS_WORK_DIR/build/warnings.log
-
 
 #
 # Prep stage, update repositories once
@@ -61,159 +33,53 @@ update-repos:
   script:
     - flock --verbose --timeout 60 $KAS_REPO_REF_DIR ./ci/update-repos
 
+# Generate the downstream pipelines
+linux-machine-config:
+  stage: prep
+  variables:
+    TEST_LEVEL: $TEST_LEVEL
+  script:
+    - for i in $(grep -L "meta-zephyr\.yml" ci/*.yml | xargs -i grep machine {} | cut -d ':' -f 2 | sort -u | grep -v unset); do ./ci/generate-ci-config $i $TEST_LEVEL >> linux-machine-config.yml; done
+  artifacts:
+    paths:
+      - linux-machine-config.yml
+    expire_in: 1 day
+
+rtos-machine-config:
+  stage: prep
+  script:
+    # avoid combinations that do not work on Zephyr or TF-M
+    - for i in $(grep -l "meta-zephyr\.yml" ci/*.yml | xargs -i grep machine {} | cut -d ':' -f 2 | sort -u | grep -v unset); do ./ci/generate-ci-config $i quick >> rtos-machine-config.yml; done
+  artifacts:
+    paths:
+      - rtos-machine-config.yml
+    expire_in: 1 day
+
+
 #
 # Build stage, the actual build jobs
 #
-# Available options for building are
-#  TOOLCHAINS: [gcc, clang, armgcc, external-gccarm]
-#  TCLIBC: [glibc, musl]
-#  VIRT: [none, xen]
-#  TESTING: testimage
 
-corstone500:
-  extends: .build
-  parallel:
-    matrix:
-      - TESTING: testimage
-  tags:
-    - x86_64
+linux-machine-pipeline:
+  stage: build
+  trigger:
+    strategy: depend
+    include:
+      - artifact: linux-machine-config.yml
+        job: linux-machine-config
 
-corstone1000-fvp:
-  extends: .build
-  parallel:
-    matrix:
-      - TESTING: testimage
-  tags:
-    - x86_64
-
-corstone1000-mps3:
-  extends: .build
-
-fvp-base:
-  extends: .build
-  parallel:
-    matrix:
-      - TESTING: testimage
-  tags:
-    - x86_64
-
-fvp-base-arm32:
-  extends: .build
-  parallel:
-    matrix:
-      - TOOLCHAINS: [gcc, external-gccarm]
-        TESTING: testimage
-  tags:
-    - x86_64
-
-fvp-baser-aemv8r64:
-  extends: .build
-
-fvps:
-  extends: .build
-
-gem5-arm64:
-  extends: .build
-  parallel:
-    matrix:
-      - VIRT: [none, xen]
-
-gem5-atp-arm64:
-  extends: .build
-
-generic-arm64:
-  extends: .build
-
-juno:
-  extends: .build
-  parallel:
-    matrix:
-      - TOOLCHAINS: [gcc, clang]
-
-microbit-v1:
-  extends: .build_and_test
-  parallel:
-    matrix:
-      - TESTING: testimage-zephyr
-
-musca-b1:
-  extends: .build
-
-musca-s1:
-  extends: .build
-
-n1sdp:
-  extends: .build
-  parallel:
-    matrix:
-      - TOOLCHAINS: [gcc, armgcc]
-
-qemu-cortex-a53:
-  extends: .build
-
-qemu-cortex-m3:
-  extends: .build_and_test
-  parallel:
-    matrix:
-      - TESTING: testimage-zephyr
-
-qemu-cortex-r5:
-  extends: .build
-
-qemu-generic-arm64:
-  extends: .build
-  parallel:
-    matrix:
-      - TOOLCHAINS: [gcc, clang]
-        TESTING: testimage
-
-qemuarm64-secureboot:
-  extends: .build
-  parallel:
-    matrix:
-      - TOOLCHAINS: [gcc, clang]
-        TCLIBC: [glibc, musl]
-        TESTING: testimage
-
-qemuarm64:
-  extends: .build
-  parallel:
-    matrix:
-      - VIRT: xen
-
-qemuarm:
-  extends: .build
-  parallel:
-    matrix:
-      - TOOLCHAINS: [gcc, clang]
-        TESTING: testimage
-      - VIRT: xen
-
-qemuarmv5:
-  extends: .build
-  parallel:
-    matrix:
-      - TESTING: testimage
-
-sgi575:
-  extends: .build
-
-tc0:
-  extends: .build
-  tags:
-    - x86_64
-
-tc1:
-  extends: .build
-  tags:
-    - x86_64
-
-toolchains:
-  extends: .build
+rtos-machine-pipeline:
+  stage: build
+  trigger:
+    strategy: depend
+    include:
+      - artifact: rtos-machine-config.yml
+        job: rtos-machine-config
 
 selftest:
   extends: .setup
   script:
+    - sudo apt update && sudo apt install --yes telnet python3-subunit
     - KASFILES=./ci/qemuarm64.yml:./ci/selftest.yml
     - kas shell --update --force-checkout $KASFILES -c 'oe-selftest --num-processes 1 --run-tests runfvp'
 
@@ -226,6 +92,14 @@ check-layers:
   parallel:
     matrix:
       - LAYER: [meta-arm, meta-arm-bsp, meta-arm-toolchain, meta-gem5]
+
+# What percentage of machines in the layer do we build
+machine-coverage:
+  stage: build
+  interruptible: true
+  script:
+    - ./ci/check-machine-coverage
+  coverage: '/Coverage: \d+/'
 
 pending-updates:
   extends: .setup
@@ -240,14 +114,6 @@ pending-updates:
   # Do this on x86 whilst the compilers are x86-only
   tags:
     - x86_64
-
-# What percentage of machines in the layer do we build
-machine-coverage:
-  stage: build
-  interruptible: true
-  script:
-    - ./ci/check-machine-coverage
-  coverage: '/Coverage: \d+/'
 
 metrics:
   extends: .setup

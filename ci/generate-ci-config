@@ -1,0 +1,104 @@
+#!/bin/bash
+
+set -e -u
+
+MACHINE=$1
+TEST_LEVEL=$2
+
+# Available options for building are
+#  TOOLCHAINS: [gcc, clang, armgcc, external-gccarm]
+#  TCLIBC: [glibc, musl]
+#  VIRT: [none, xen]
+#  TESTING: testimage
+
+case $TEST_LEVEL in
+	6)
+		TC="gcc, clang, armgcc, external-gccarm"
+		LIBC="glibc, musl"
+		VIRT="none, xen"
+		;;
+	5)
+		TC="gcc, clang, armgcc, external-gccarm"
+		LIBC="glibc, musl"
+		VIRT="none"
+		;;
+	4)
+		TC="gcc, clang, armgcc, external-gccarm"
+		LIBC="glibc"
+		VIRT="none"
+		;;
+	3)
+		TC="gcc, armgcc, external-gccarm"
+		LIBC="glibc"
+		VIRT="none"
+		;;
+	2)
+		TC="gcc, armgcc"
+		LIBC="glibc"
+		VIRT="none"
+		;;
+	*)
+		TC="gcc"
+		LIBC="glibc"
+		VIRT="none"
+		;;
+esac
+
+#Only run testimage on machines that can handle it
+if [[ $(find . -name $MACHINE.conf -exec grep -l 'FVP_\|QB_' {} \;) != "" ]]; then
+	if [ $(grep -l "meta-zephyr\.yml" ci/$MACHINE.yml) ]; then
+		TEST="testimage-zephyr"
+	# FIXME - work around not having runfvp working on an fvp machine
+	elif [ $MACHINE == "fvp-baser-aemv8r64" ]; then
+		TEST="none"
+	else
+		TEST="testimage"
+	fi
+else
+	TEST="none"
+fi
+
+# Add Tags as needed
+case $MACHINE in
+	"fvp-base"* | "corstone"* | "tc"*) TAGS="  tags:\n    - x86_64";;
+	*) TAGS="";;
+esac
+
+echo -e "$MACHINE:
+  interruptible: true
+  variables:
+    KAS_WORK_DIR: \$CI_PROJECT_DIR/work
+    KAS_REPO_REF_DIR: \$CI_BUILDS_DIR/persist/repos
+    SSTATE_DIR: \$CI_BUILDS_DIR/persist/sstate
+    DL_DIR: \$CI_BUILDS_DIR/persist/downloads
+    BB_LOGCONFIG: \$CI_PROJECT_DIR/ci/logging.yml
+    TOOLCHAIN_DIR: \$CI_BUILDS_DIR/persist/toolchains
+    IMAGE_DIR: \$CI_PROJECT_DIR/work/build/tmp/deploy/images
+    TOOLCHAIN_LINK_DIR: \$CI_PROJECT_DIR/work/build/toolchains
+  before_script:
+    - echo KAS_WORK_DIR = \$KAS_WORK_DIR
+    - echo SSTATE_DIR = \$SSTATE_DIR
+    - echo DL_DIR = \$DL_DIR
+    - rm -rf \$KAS_WORK_DIR
+    - mkdir --verbose --parents \$KAS_WORK_DIR \$KAS_REPO_REF_DIR \$SSTATE_DIR \$DL_DIR \$TOOLCHAIN_DIR \$TOOLCHAIN_LINK_DIR
+    # Must do this here, as it's the only way to make sure the toolchain is installed on the same builder
+    - ./ci/get-binary-toolchains \$DL_DIR \$TOOLCHAIN_DIR \$TOOLCHAIN_LINK_DIR
+    - sudo apt update && sudo apt install --yes telnet python3-subunit
+  script:
+    - KASFILES=\$(./ci/jobs-to-kas \"\$CI_JOB_NAME\")
+    - kas shell --update --force-checkout \$KASFILES -c 'cat conf/*.conf'
+    - kas build \$KASFILES
+    - ./ci/check-warnings \$KAS_WORK_DIR/build/warnings.log
+  parallel:
+    matrix:
+      - TOOLCHAINS: [$TC]
+        TCLIBC: [$LIBC]
+        VIRT: [$VIRT]
+        TESTING: [$TEST]
+  artifacts:
+    name: "logs"
+    when: on_failure
+    paths:
+      - $CI_PROJECT_DIR/work/build/tmp/work*/**/temp/log.do_*.*
+$TAGS
+"
