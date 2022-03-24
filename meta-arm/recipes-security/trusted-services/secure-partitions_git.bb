@@ -3,6 +3,9 @@ HOMEPAGE = "https://trusted-services.readthedocs.io/en/latest/index.html"
 
 COMPATIBLE_MACHINE ?= "invalid"
 
+# For now we only build with GCC, so stop meta-clang trying to get involved
+TOOLCHAIN = "gcc"
+
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 require secure-partitions.inc
