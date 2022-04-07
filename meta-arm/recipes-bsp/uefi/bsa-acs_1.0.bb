@@ -5,7 +5,7 @@ PROVIDES:remove = "virtual/uefi-firmware"
 LICENSE += "& Apache-2.0"
 LIC_FILES_CHKSUM += "file://ShellPkg/Application/bsa-acs/LICENSE.md;md5=2a944942e1496af1886903d274dedb13"
 
-SRC_URI += "git://github.com/ARM-software/bsa-acs;destsuffix=edk2/ShellPkg/Application/bsa-acs;protocol=https;branch=release;name=acs \
+SRC_URI += "git://github.com/ARM-software/bsa-acs;destsuffix=edk2/ShellPkg/Application/bsa-acs;protocol=https;branch=main;name=acs \
             git://github.com/tianocore/edk2-libc;destsuffix=edk2/edk2-libc;protocol=https;branch=master;name=libc \
             file://ir_bsa.patch \
             file://edk2_gicv3.patch \
