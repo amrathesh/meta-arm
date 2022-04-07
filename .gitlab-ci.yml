@@ -179,15 +179,16 @@ qemuarm64:
   extends: .build
   parallel:
     matrix:
-      - VIRT: xen
+      - VIRT: [xen, xen-guest]
+        TESTING: testimage
 
 qemuarm:
   extends: .build
   parallel:
     matrix:
       - TOOLCHAINS: [gcc, clang]
+        VIRT: [none, xen, xen-guest]
         TESTING: testimage
-      - VIRT: xen
 
 qemuarmv5:
   extends: .build
